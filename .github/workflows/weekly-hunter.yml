@@ -1,0 +1,31 @@
+name: Weekly PDF Hunter 🎓
+
+on:
+  schedule:
+    # اجرا در ساعت 20:29 UTC (معادل 23:59 جمعه به وقت تهران)
+    - cron: '29 20 * * 5'
+  workflow_dispatch: # دکمه اجرای دستی
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository 🛎️
+        uses: actions/checkout@v3
+
+      - name: Set up Python 🐍
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies 📦
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run Scraper 👾
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+        run: |
+          python scraper.py
