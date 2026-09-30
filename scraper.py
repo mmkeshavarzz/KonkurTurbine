@@ -1,12 +1,12 @@
 """
 =============================================================================
-*  Project: Konkur PDF Hunter & Auto Categorizer 🎓 (Turbine Style)
-*  Author: mm.keshavarzz | Cleaned & Supercharged by Senior Dev 👨‍💻
+*  Project: Konkur PDF Hunter 🎓 (DEEP DIVER EDITION 🌊)
+*  Author: mm.keshavarzz | Supercharged by Senior AI 👨‍💻
 *  Features:
-*    - Time-Travel Filtering (Only 7-Days Old Files) ⏳
-*    - Smart Regex Categorization (Majors, Exams, Lessons) 🧠
-*    - Hashtag & Attached-words bypass mechanism
-*    - 🚀 Auto-Broadcast to Telegram Channel!
+*    - Deep Pagination (ورق زدن کانال تا رسیدن به محدودیت زمانی) 📚
+*    - Anti-503 Error System (دور زدن محدودیت‌های تلگرام) 🛡️
+*    - Ultra-Beautiful HTML Telegram Messages ✨
+*    - Smart Regex Categorization 🧠
 =============================================================================
 """
 
@@ -17,26 +17,17 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-# =============================================================================
-# 📡 لیست کانال‌های هدف (بدون @)
-# =============================================================================
+# لیست کانال‌ها
 CHANNELS = [
-    "Soal75", "WWW_AZMON_COM", "pdf_konkor", "www_book_com", "Irdaneshamoz", "NOTRUPHIL", "@ketabkonkuor",  # نمونه - کانال‌های خودت رو اینجا بذار
-    "plasma_ir", "silent_konkor", "Vidana_file", "mrkonkor", "AyandehSazan_Ed"
-    
-    
-    
-    
-    # "channel_name_1", "channel_name_2"
+    "Soal75", "WWW_AZMON_COM", "pdf_konkor", "www_book_com", 
+    "Irdaneshamoz", "NOTRUPHIL", "ketabkonkuor", "plasma_ir", 
+    "silent_konkor", "Vidana_file", "mrkonkor", "AyandehSazan_Ed"
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# =============================================================================
-# 🏷️ دیکشنری دسته‌بندی هوشمند (تشخیص هشتگ و کلمات چسبیده)
-# =============================================================================
 TAGS_DICTIONARY = {
     "رشته": {
         "🧬 تجربی": ["تجربی", "تجر", "biology_major"],
@@ -44,7 +35,7 @@ TAGS_DICTIONARY = {
         "⚖️ انسانی": ["انسانی", "فلسفه", "ادبیات_تخصصی"]
     },
     "آزمون": {
-        "کنکور سراسری": ["سراسری", "کنکور", "konkur"],
+        "سراسری": ["سراسری", "کنکور", "konkur"],
         "قلم‌چی": ["قلم", "قلمچی", "قلم_چی", "کانون"],
         "ماز": ["ماز", "maz"],
         "گاج": ["گاج", "gaj"],
@@ -58,128 +49,162 @@ TAGS_DICTIONARY = {
         "زیست‌شناسی": ["زیست", "zist", "گیاهی", "جانوری"],
         "شیمی": ["شیمی", "shimi"],
         "فیزیک": ["فیزیک", "fizik"],
-        "ریاضیات": ["حسابان", "هندسه", "گسسته", "آمار"],
-        "دروس عمومی/انسانی": ["ادبیات", "فارسی", "عربی", "دینی", "زبان", "اقتصاد", "منطق", "فلسفه", "روانشناسی", "جامعه"]
+        "ریاضیات": ["حسابان", "هندسه", "گسسته", "آمار", "ریاضی"],
+        "عمومی/انسانی": ["ادبیات", "فارسی", "عربی", "دینی", "زبان", "اقتصاد", "منطق"]
     }
 }
 
-# =============================================================================
-# 🧹 تابع تمیزکننده و تگ‌یاب (قاتل هشتگ‌ها و کلمات چسبیده)
-# =============================================================================
 def extract_tags(text: str):
-    """متن رو می‌گیره، زیر و رو می‌کنه و تگ‌های مرتبط رو پیدا می‌کنه."""
-    # حذف کاراکترهای اضافی مثل # و _ و فاصله‌های مجازی برای جستجوی بهتر
     clean_text = re.sub(r'[_#\-\u200c]', '', text.lower())
-    
     found_tags = {"رشته": [], "آزمون": [], "درس": []}
-    
     for category, items in TAGS_DICTIONARY.items():
         for tag_name, keywords in items.items():
             if any(kw in clean_text for kw in keywords):
                 found_tags[category].append(tag_name)
-                
     return found_tags
 
-# =============================================================================
-# ⏳ فیلتر زمان (ماشین زمان ۷ روزه)
-# =============================================================================
-def is_from_last_week(date_str: str) -> bool:
-    """بررسی میکنه که آیا پست مال شنبه تا جمعه اخیر هست یا نه."""
-    if not date_str:
-        return False
-    try:
-        post_time = datetime.fromisoformat(date_str)
-        now = datetime.now(timezone.utc)
-        # فقط فایل‌هایی که در 7 روز گذشته آپلود شدن
-        return (now - post_time) <= timedelta(days=7)
-    except:
-        return False
-
-# =============================================================================
-# 🚀 ارسال مستقیم به کانال تلگرام
-# =============================================================================
 def send_to_telegram(file_title, post_url, tags, source_channel):
     bot_token = os.environ.get("TELEGRAM_TOKEN")
     channel_id = os.environ.get("TELEGRAM_CHANNEL")
-
     if not bot_token or not channel_id:
-        print("⚠️ توکن تلگرام یا آیدی کانال ست نشده!")
         return
 
-    # ساخت پیام با کلاس و خوشگل
-    msg = f"🎓 **فایل جدید شکار شد!**\n\n"
-    msg += f"📄 **عنوان:** `{file_title}`\n\n"
+    # 🎨 دیزاین جدید، خفن و لاکچری با استفاده از HTML و Blockquote
+    reshteh = f"🎓 <b>رشته:</b> {' | '.join(tags['رشته'])}" if tags['رشته'] else ""
+    azmoon = f"📝 <b>آزمون:</b> {' | '.join(tags['آزمون'])}" if tags['آزمون'] else ""
+    dars = f"📚 <b>درس:</b> {' | '.join(tags['درس'])}" if tags['درس'] else ""
     
-    if tags['رشته']: msg += f"🎓 **رشته:** {' | '.join(tags['رشته'])}\n"
-    if tags['آزمون']: msg += f"📝 **آزمون:** {' | '.join(tags['آزمون'])}\n"
-    if tags['درس']: msg += f"📚 **درس:** {' | '.join(tags['درس'])}\n"
-    
-    msg += f"\n📢 **منبع:** `@{source_channel}`\n"
-    msg += f"📥 **لینک دانلود مستقیم پست:**\n[کلیک کنید و فایل را دریافت کنید]({post_url})"
+    details = "\n".join(filter(None, [reshteh, azmoon, dars]))
+    if details:
+        details = f"\n{details}\n"
+
+    msg = (
+        f"🧨 <b>شکار جدید توربین!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"📄 <b>عنوان فایل:</b>\n"
+        f"<blockquote>{file_title}</blockquote>\n"
+        f"{details}"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"📡 <b>منبع اصلی:</b> @{source_channel}\n"
+        f"📥 <a href='{post_url}'>[ ☁️ کلیک برای دانلود مستقیم فایل ]</a>"
+    )
 
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = {
-            "chat_id": channel_id,
-            "text": msg,
-            "parse_mode": "Markdown",
+            "chat_id": channel_id, 
+            "text": msg, 
+            "parse_mode": "HTML", 
             "disable_web_page_preview": True
         }
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"❌ خطا در ارسال فایل {file_title}: {e}")
+        print(f"❌ خطا در ارسال به تلگرام: {e}")
 
-# =============================================================================
-# ⚙️ موتور اصلی (The Core)
-# =============================================================================
 def main():
-    print("🕵️‍♂️ شکارچی کنکور روشن شد! در حال اسکن فایل‌های هفته اخیر...")
-    
+    print("🚀 زیردریایی توربین روشن شد! در حال غواصی در کانال‌ها...")
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    # استفاده از Session برای پایداری بیشتر کانکشن‌ها
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
     for ch in CHANNELS:
-        print(f"🔍 در حال بررسی کانال: @{ch}")
-        try:
-            res = requests.get(f"https://t.me/s/{ch}", headers=HEADERS, timeout=15)
-            if res.status_code != 200:
-                continue
+        ch = ch.replace('@', '')
+        print(f"\n🌊 در حال غواصی عمیق در کانال: @{ch}")
+        base_url = f"https://t.me/s/{ch}"
+        current_url = base_url
+        
+        keep_scraping = True
+        pages_scraped = 0
+        total_files_in_channel = 0
+
+        while keep_scraping and pages_scraped < 100: # لیمیت ۱۰۰ صفحه برای جلوگیری از گیر افتادن
+            try:
+                res = session.get(current_url, timeout=15)
                 
-            soup = BeautifulSoup(res.text, 'html.parser')
-            messages = soup.find_all('div', class_='tgme_widget_message')
-            
-            for msg in messages:
-                # 1. بررسی زمان
-                time_tag = msg.find('time', class_='time')
-                if not time_tag or not is_from_last_week(time_tag.get('datetime')):
-                    continue # اگه مال این هفته نیست، بی‌خیالش شو!
-
-                # 2. پیدا کردن داکیومنت (فایل)
-                doc_wrap = msg.find('div', class_='tgme_widget_message_document')
-                if doc_wrap:
-                    title_elem = doc_wrap.find('div', class_='tgme_widget_message_document_title')
-                    if not title_elem: continue
-                    title = title_elem.text.strip()
+                # 🛡️ سیستم ضد ارور 503 (در صورتی که تلگرام خسته بشه)
+                if res.status_code == 503:
+                    print("⚠️ تلگرام ارور 503 داد! 10 ثانیه استراحت تاکتیکی...")
+                    time.sleep(10)
+                    continue
+                
+                if res.status_code != 200:
+                    break
                     
-                    # اگه پی‌دی‌اف بود...
-                    if title.lower().endswith('.pdf'):
-                        post_id = msg.get('data-post') # فرمت: channel/123
-                        post_url = f"https://t.me/{post_id}"
-                        
-                        # استخراج متن کپشن برای دسته‌بندی بهتر
-                        caption_elem = msg.find('div', class_='tgme_widget_message_text')
-                        caption = caption_elem.text if caption_elem else ""
-                        
-                        # جستجوی تگ‌ها در اسم فایل و کپشن
-                        combined_text = title + " " + caption
-                        tags = extract_tags(combined_text)
-                        
-                        # ارسال به کانال
-                        send_to_telegram(title, post_url, tags, ch)
-                        print(f"✅ ارسال شد: {title}")
-                        time.sleep(2) # یه نفس کوچیک برای جلوگیری از بن شدن توسط تلگرام
-                        
-        except Exception as e:
-            print(f"❌ خطا در اسکن کانال @{ch}: {e}")
+                soup = BeautifulSoup(res.text, 'html.parser')
+                messages = soup.find_all('div', class_='tgme_widget_message')
+                
+                if not messages:
+                    break
 
-    print("🎉 عملیات هفتگی با موفقیت به پایان رسید!")
+                min_post_id = None
+                oldest_date_in_page = now
+
+                for msg in messages:
+                    # پیدا کردن ID برای ورق زدن به صفحه قبل
+                    post_id_str = msg.get('data-post')
+                    if post_id_str:
+                        try:
+                            msg_id = int(post_id_str.split('/')[-1])
+                            if min_post_id is None or msg_id < min_post_id:
+                                min_post_id = msg_id
+                        except: pass
+
+                    # بررسی زمان
+                    time_tag = msg.find('time', class_='time')
+                    if not time_tag: continue
+                    
+                    try:
+                        post_time = datetime.fromisoformat(time_tag.get('datetime'))
+                        if post_time < oldest_date_in_page:
+                            oldest_date_in_page = post_time
+                            
+                        # اگه پیام مال قبل از یک هفته پیشه، کلا ازش رد شو
+                        if post_time < week_ago:
+                            continue
+                            
+                    except: continue
+
+                    # پیدا کردن فایل PDF
+                    doc_wrap = msg.find('div', class_='tgme_widget_message_document')
+                    if doc_wrap:
+                        title_elem = doc_wrap.find('div', class_='tgme_widget_message_document_title')
+                        if not title_elem: continue
+                        title = title_elem.text.strip()
+                        
+                        if title.lower().endswith('.pdf'):
+                            post_url = f"https://t.me/{post_id_str}"
+                            caption_elem = msg.find('div', class_='tgme_widget_message_text')
+                            caption = caption_elem.text if caption_elem else ""
+                            
+                            tags = extract_tags(title + " " + caption)
+                            send_to_telegram(title, post_url, tags, ch)
+                            total_files_in_channel += 1
+                            time.sleep(1.5) # استراحت کوچیک بین ارسال‌ها
+
+                # بررسی اینکه آیا به ته هفته رسیدیم؟
+                if oldest_date_in_page < week_ago:
+                    print(f"⏳ رسیدیم به مرز 7 روز پیش در @{ch}. پایان غواصی در این کانال.")
+                    keep_scraping = False
+                    break
+
+                # رفتن به صفحه قبل (پیام‌های قدیمی‌تر)
+                if min_post_id and keep_scraping:
+                    current_url = f"{base_url}?before={min_post_id}"
+                    pages_scraped += 1
+                    time.sleep(2) # استراحت بین صفحات برای جلوگیری از ارور 503
+                else:
+                    break
+
+            except Exception as e:
+                print(f"❌ خطا در کانال @{ch}: {e}")
+                break
+        
+        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد")
+
+    print("\n🎉 غواصی با موفقیت تمام شد! هزاران فایل در انتظار شماست.")
 
 if __name__ == "__main__":
     main()
