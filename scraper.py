@@ -1,21 +1,23 @@
 """
 =============================================================================
-*  Project: Konkur PDF Hunter 🎓 (MONSTER EDITION 🦖)
+*  Project: Konkur PDF Hunter 🎓 (TELETHON MONSTER EDITION 🦖)
 *  Author: mm.keshavarzz | Supercharged by Senior AI 👨‍💻
 *  Features:
-*    - 2000-Message Deep Scan (شخم زدن ۲۰۰۰ پیام آخر بدون توقف) 📚
-*    - Mathematical Anti-Pin (خنثی‌سازی تله پین‌مسیج با علم آمار) 🧮
-*    - Smart Date Filter (جدا کردن فایل‌های ۷ روز اخیر) ⏳
+*    - Async Userbot Architecture (یوزربات فوق‌سریع) ⚡
+*    - Bot-in-Bot Bypass (دور زدن ربات‌های واسطه و سرقت PDF مخفی) 🥷
+*    - Perfect Chronological Scan (بدون افتادن در تله پین‌مسیج) 🕰️
+*    - Smart Date Filter (فیلتر دقیق ۷ روز اخیر) ⏳
 =============================================================================
 """
 
 import os
 import re
-import time
-import statistics
+import asyncio
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+from telethon.tl.types import DocumentAttributeFilename
 
 # لیست کانال‌ها
 CHANNELS = [
@@ -24,10 +26,7 @@ CHANNELS = [
     "silent_konkor", "Vidana_file", "mrkonkor", "AyandehSazan_Ed"
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
+# دیتابیس کلمات کلیدی
 TAGS_DICTIONARY = {
     "رشته": {
         "🧬 تجربی": ["تجربی", "تجر", "biology_major"],
@@ -54,7 +53,15 @@ TAGS_DICTIONARY = {
     }
 }
 
+# گرفتن سکرت‌ها از محیط سیستم (GitHub Secrets)
+API_ID = int(os.environ.get("TELEGRAM_API_ID", 2040))
+API_HASH = os.environ.get("TELEGRAM_API_HASH", "")
+SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+TARGET_CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "")
+
 def extract_tags(text: str):
+    """ استخراج هوشمند تگ‌ها از متن """
     clean_text = re.sub(r'[_#\-\u200c]', '', text.lower())
     found_tags = {"رشته": [], "آزمون": [], "درس": []}
     for category, items in TAGS_DICTIONARY.items():
@@ -64,12 +71,10 @@ def extract_tags(text: str):
     return found_tags
 
 def send_to_telegram(file_title, post_url, tags, source_channel):
-    bot_token = os.environ.get("TELEGRAM_TOKEN")
-    channel_id = os.environ.get("TELEGRAM_CHANNEL")
-    if not bot_token or not channel_id:
+    """ ارسال بنر گرافیکی به کانال از طریق ربات API """
+    if not BOT_TOKEN or not TARGET_CHANNEL:
         return
 
-    # 🎨 دیزاین خفن و لاکچری پیام‌ها
     reshteh = f"🎓 <b>رشته:</b> {' | '.join(tags['رشته'])}" if tags['رشته'] else ""
     azmoon = f"📝 <b>آزمون:</b> {' | '.join(tags['آزمون'])}" if tags['آزمون'] else ""
     dars = f"📚 <b>درس:</b> {' | '.join(tags['درس'])}" if tags['درس'] else ""
@@ -86,113 +91,123 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
         f"{details}"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"📡 <b>منبع:</b> @{source_channel}\n"
-        f"📥 <a href='{post_url}'>[ ☁️ دانلود مستقیم فایل ]</a>"
+        f"📥 <a href='{post_url}'>[ ☁️ مشاهده/دانلود فایل ]</a>"
     )
 
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": channel_id, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TARGET_CHANNEL, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"❌ خطا در ارسال به تلگرام: {e}")
+        print(f"❌ خطا در ارسال بنر: {e}")
 
-def main():
-    print("🦖 هیولای توربین روشن شد! هدف: شخم زدن ۲۰۰۰ پیام آخر هر کانال...")
-    now = datetime.now(timezone.utc)
-    week_ago = now - timedelta(days=7)
+async def extract_bot_links(msg):
+    """ پیدا کردن لینک ربات‌های واسطه در متن یا دکمه‌های شیشه‌ای """
+    links = []
+    search_text = msg.text or ""
+    # جستجو در دکمه‌های زیر پیام
+    if msg.reply_markup and hasattr(msg.reply_markup, 'rows'):
+        for row in msg.reply_markup.rows:
+            for btn in row.buttons:
+                if hasattr(btn, 'url') and btn.url:
+                    search_text += f" {btn.url} "
+                    
+    # استخراج فرمت t.me/BotName?start=123
+    found = re.findall(r't\.me/([a-zA-Z0-9_]+)\?start=([a-zA-Z0-9_-]+)', search_text)
+    links.extend(found)
+    return links
 
-    session = requests.Session()
-    session.headers.update(HEADERS)
+async def main():
+    print("🦖 موتور یوزربات توربین با قدرت Telethon روشن شد!")
+    if not SESSION_STRING:
+        print("❌ واویلا! سشن استرینگ پیدا نشد. حتما توی گیت‌هاب سکرت‌ها اضافه‌اش کن.")
+        return
+
+    # استارت کلاینت یوزربات
+    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+    await client.start()
+    
+    # فیلتر تاریخ (دقیقاً ۷ روز گذشته)
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
     for ch in CHANNELS:
-        ch = ch.replace('@', '')
-        print(f"\n🚜 در حال شخم زدن عمیق کانال: @{ch}")
-        base_url = f"https://t.me/s/{ch}"
-        current_url = base_url
-        
-        keep_scraping = True
-        pages_scraped = 0
-        total_files_in_channel = 0
-        MAX_PAGES = 100 # 100 صفحه * 20 پیام = حدود 2000 پیام! 🤯
+        ch_clean = ch.replace('@', '')
+        print(f"\n🚜 در حال شخم زدن کانال: @{ch_clean} ...")
+        total_files = 0
+        scanned_msgs = 0
 
-        while keep_scraping and pages_scraped < MAX_PAGES:
-            try:
-                res = session.get(current_url, timeout=15)
-                if res.status_code == 503:
-                    print("⚠️ تلگرام خسته شد (ارور 503)! 10 ثانیه استراحت تاکتیکی...")
-                    time.sleep(10)
-                    continue
-                if res.status_code != 200:
-                    break
+        try:
+            # اسکن 2000 پیام آخر (اتوماتیک از جدید به قدیم)
+            async for msg in client.iter_messages(ch_clean, limit=2000):
+                # اگر رسیدیم به پیام‌های قدیمی‌تر از 7 روز، این کانال رو بی‌خیال شو
+                if msg.date < week_ago:
+                    break 
+                
+                scanned_msgs += 1
+                is_pdf = False
+                file_title = "فایل_بدون_نام.pdf"
+
+                # ----------------------------------------------------
+                # شکار نوع اول: فایل PDF مستقیم
+                # ----------------------------------------------------
+                if msg.document:
+                    if msg.document.mime_type == 'application/pdf':
+                        is_pdf = True
+                    # پیدا کردن اسم دقیق فایل
+                    for attr in msg.document.attributes:
+                        if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
+                            file_title = attr.file_name
+                            if file_title.lower().endswith('.pdf'):
+                                is_pdf = True
                     
-                soup = BeautifulSoup(res.text, 'html.parser')
-                messages = soup.find_all('div', class_='tgme_widget_message')
-                if not messages:
-                    break
+                    if is_pdf:
+                        caption = msg.text or ""
+                        tags = extract_tags(file_title + " " + caption)
+                        post_url = f"https://t.me/{ch_clean}/{msg.id}"
+                        send_to_telegram(file_title, post_url, tags, ch_clean)
+                        total_files += 1
+                        continue # برو پیام بعدی
 
-                valid_ids = []
-
-                for msg in messages:
-                    # ۱. گرفتن آیدی پیام برای ورق زدن
-                    post_id_str = msg.get('data-post')
-                    if post_id_str:
-                        try: valid_ids.append(int(post_id_str.split('/')[-1]))
-                        except: pass
-
-                    # ۲. بررسی تاریخ پیام
-                    time_tag = msg.find('time', class_='time')
-                    post_time = None
-                    if time_tag:
-                        try: post_time = datetime.fromisoformat(time_tag.get('datetime'))
-                        except: pass
-
-                    # فیلتر جادویی ۷ روز اخیر
-                    if not post_time or post_time < week_ago:
-                        continue
-
-                    # ۳. شکار PDF
-                    doc_wrap = msg.find('div', class_='tgme_widget_message_document')
-                    if doc_wrap:
-                        title_elem = doc_wrap.find('div', class_='tgme_widget_message_document_title')
-                        if not title_elem: continue
-                        title = title_elem.text.strip()
+                # ----------------------------------------------------
+                # شکار نوع دوم: دور زدن ربات‌های واسطه (Bot-in-Bot) 🥷
+                # ----------------------------------------------------
+                bot_links = await extract_bot_links(msg)
+                for bot_username, start_param in bot_links:
+                    print(f"🕵️‍♂️ ربات واسطه کشف شد! ارسال دستور حمله به @{bot_username}")
+                    try:
+                        # ارسال دستور استارت به ربات واسطه
+                        await client.send_message(bot_username, f"/start {start_param}")
+                        await asyncio.sleep(4) # 4 ثانیه صبر برای دریافت جواب از ربات
                         
-                        if title.lower().endswith('.pdf'):
-                            post_url = f"https://t.me/{post_id_str}"
-                            caption_elem = msg.find('div', class_='tgme_widget_message_text')
-                            caption = caption_elem.text if caption_elem else ""
-                            
-                            tags = extract_tags(title + " " + caption)
-                            send_to_telegram(title, post_url, tags, ch)
-                            total_files_in_channel += 1
-                            time.sleep(1.5)
+                        # خوندن آخرین پیام ربات واسطه
+                        async for bot_msg in client.iter_messages(bot_username, limit=2):
+                            if bot_msg.document and bot_msg.document.mime_type == 'application/pdf':
+                                b_file = "فایل_مخفی.pdf"
+                                for attr in bot_msg.document.attributes:
+                                    if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
+                                        b_file = attr.file_name
+                                
+                                # فوروارد کردن خود فایل مخفی به کانال تارگت! 🚀
+                                if TARGET_CHANNEL:
+                                    await client.forward_messages(TARGET_CHANNEL, bot_msg)
+                                
+                                # ارسال بنر گرافیکی
+                                tags = extract_tags(b_file + " " + (bot_msg.text or msg.text or ""))
+                                post_url = f"https://t.me/{ch_clean}/{msg.id}"
+                                send_to_telegram(b_file, post_url, tags, f"{ch_clean} (ربات واسطه)")
+                                total_files += 1
+                                break
+                    except Exception as e:
+                        print(f"⚠️ ربات واسطه @{bot_username} مقاومت کرد: {e}")
 
-                # ۴. الگوریتم جدید و هوشمند ضد تله پین‌مسیج (استفاده از میانه آماری)
-                if valid_ids:
-                    # گرفتن میانه (عدد وسط) برای حذف داده‌های پرت (پیام‌های پین‌شده خیلی جدید یا خیلی قدیمی)
-                    median_id = statistics.median(valid_ids)
-                    
-                    # فقط آیدی‌هایی رو قبول می‌کنیم که با میانه اختلاف فاحش نداشته باشن
-                    normal_ids = [vid for vid in valid_ids if abs(vid - median_id) < 3000]
-                    
-                    if not normal_ids:
-                        normal_ids = valid_ids
-                        
-                    min_post_id = min(normal_ids)
-                    
-                    current_url = f"{base_url}?before={min_post_id}"
-                    pages_scraped += 1
-                    time.sleep(2)
-                else:
-                    break
+                await asyncio.sleep(0.5) # استراحت کوچیک برای جلوگیری از بن شدن یوزربات
 
-            except Exception as e:
-                print(f"❌ خطا در کانال @{ch}: {e}")
-                break
+        except Exception as e:
+            print(f"❌ خطا در کانال @{ch_clean}: {e}")
         
-        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد (از بررسی ~{pages_scraped * 20} پیام)")
+        print(f"🎯 نتیجه @{ch_clean}: کشف {total_files} فایل (از بین {scanned_msgs} پیام اسکن شده)")
 
-    print("\n🎉 عملیات هیولا تمام شد! خسته نباشی دلاور.")
+    print("\n🎉 عملیات هیولای Telethon تمام شد! خسته نباشی دلاور.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
