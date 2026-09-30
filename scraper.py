@@ -1,18 +1,18 @@
 """
 =============================================================================
-*  Project: Konkur PDF Hunter 🎓 (BULLDOZER EDITION 🚜)
+*  Project: Konkur PDF Hunter 🎓 (MONSTER EDITION 🦖)
 *  Author: mm.keshavarzz | Supercharged by Senior AI 👨‍💻
 *  Features:
-*    - 1000-Message Deep Scan (شخم زدن ۱۰۰۰ پیام آخر بدون توقف) 📚
-*    - Anti-Pinned-Message Trap (جاخالی دادن از پیام‌های پین‌شده قدیمی) 🕳️
-*    - Smart Date Filter (جدا کردن فایل‌های ۷ روز اخیر از دل تاریخچه) ⏳
-*    - Ultra-Beautiful HTML Telegram Messages ✨
+*    - 2000-Message Deep Scan (شخم زدن ۲۰۰۰ پیام آخر بدون توقف) 📚
+*    - Mathematical Anti-Pin (خنثی‌سازی تله پین‌مسیج با علم آمار) 🧮
+*    - Smart Date Filter (جدا کردن فایل‌های ۷ روز اخیر) ⏳
 =============================================================================
 """
 
 import os
 import re
 import time
+import statistics
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
@@ -69,7 +69,7 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
     if not bot_token or not channel_id:
         return
 
-    # 🎨 دیزاین خفن و لاکچری پیام‌ها تو تلگرام
+    # 🎨 دیزاین خفن و لاکچری پیام‌ها
     reshteh = f"🎓 <b>رشته:</b> {' | '.join(tags['رشته'])}" if tags['رشته'] else ""
     azmoon = f"📝 <b>آزمون:</b> {' | '.join(tags['آزمون'])}" if tags['آزمون'] else ""
     dars = f"📚 <b>درس:</b> {' | '.join(tags['درس'])}" if tags['درس'] else ""
@@ -97,7 +97,7 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
         print(f"❌ خطا در ارسال به تلگرام: {e}")
 
 def main():
-    print("🚜 بولدوزر توربین روشن شد! هدف: شخم زدن ۱۰۰۰ پیام آخر هر کانال...")
+    print("🦖 هیولای توربین روشن شد! هدف: شخم زدن ۲۰۰۰ پیام آخر هر کانال...")
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
 
@@ -113,7 +113,7 @@ def main():
         keep_scraping = True
         pages_scraped = 0
         total_files_in_channel = 0
-        MAX_PAGES = 50 # 50 صفحات * 20 پیام = حدود 1000 پیام بررسی میشه
+        MAX_PAGES = 100 # 100 صفحه * 20 پیام = حدود 2000 پیام! 🤯
 
         while keep_scraping and pages_scraped < MAX_PAGES:
             try:
@@ -139,14 +139,14 @@ def main():
                         try: valid_ids.append(int(post_id_str.split('/')[-1]))
                         except: pass
 
-                    # ۲. بررسی تاریخ پیام (فقط فایل‌های این هفته رو می‌فرستیم تا اسپم نشه)
+                    # ۲. بررسی تاریخ پیام
                     time_tag = msg.find('time', class_='time')
                     post_time = None
                     if time_tag:
                         try: post_time = datetime.fromisoformat(time_tag.get('datetime'))
                         except: pass
 
-                    # اگه پیام مال قبل از ۷ روزه، فقط "این پیام" رو بی‌خیال شو، اما حلقه رو نشکن!
+                    # فیلتر جادویی ۷ روز اخیر
                     if not post_time or post_time < week_ago:
                         continue
 
@@ -167,14 +167,19 @@ def main():
                             total_files_in_channel += 1
                             time.sleep(1.5)
 
-                # ۴. الگوریتم ضد تله پین‌مسیج برای ورق زدن
+                # ۴. الگوریتم جدید و هوشمند ضد تله پین‌مسیج (استفاده از میانه آماری)
                 if valid_ids:
-                    valid_ids.sort()
-                    max_id_on_page = valid_ids[-1]
-                    # فقط آیدی‌هایی رو قبول کن که با بزرگترین آیدی صفحه اختلاف فضایی ندارن (حذف پین‌ها)
-                    normal_ids = [vid for vid in valid_ids if (max_id_on_page - vid) < 5000]
+                    # گرفتن میانه (عدد وسط) برای حذف داده‌های پرت (پیام‌های پین‌شده خیلی جدید یا خیلی قدیمی)
+                    median_id = statistics.median(valid_ids)
                     
-                    min_post_id = normal_ids[0] if normal_ids else valid_ids[0]
+                    # فقط آیدی‌هایی رو قبول می‌کنیم که با میانه اختلاف فاحش نداشته باشن
+                    normal_ids = [vid for vid in valid_ids if abs(vid - median_id) < 3000]
+                    
+                    if not normal_ids:
+                        normal_ids = valid_ids
+                        
+                    min_post_id = min(normal_ids)
+                    
                     current_url = f"{base_url}?before={min_post_id}"
                     pages_scraped += 1
                     time.sleep(2)
@@ -185,9 +190,9 @@ def main():
                 print(f"❌ خطا در کانال @{ch}: {e}")
                 break
         
-        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد (از بررسی {pages_scraped * 20} پیام)")
+        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد (از بررسی ~{pages_scraped * 20} پیام)")
 
-    print("\n🎉 عملیات بولدوزر تمام شد! الان دیگه کانالت باید منفجر شده باشه.")
+    print("\n🎉 عملیات هیولا تمام شد! خسته نباشی دلاور.")
 
 if __name__ == "__main__":
     main()
