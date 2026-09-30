@@ -22,7 +22,7 @@ from telethon.sessions import StringSession
 from telethon.tl.types import DocumentAttributeFilename
 from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
-from telethon.errors import UserAlreadyParticipantError
+from telethon.errors import UserAlreadyParticipantError, FloodWaitError
 
 CHANNELS = [
     "Soal75", "WWW_AZMON_COM", "pdf_konkor", "www_book_com", 
@@ -64,6 +64,8 @@ TARGET_CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "")
 
 # 🌐 دیتابیس موقت برای ذخیره لینک‌های اسپانسر پیدا شده
 SPONSOR_LINKS_ARCHIVE = set()
+VISITED_BOT_PARAMS = set() # دیتابیس موقت برای جلوگیری از استارت‌های تکراری
+
 
 def extract_tags(text: str):
     clean_text = re.sub(r'[_#\-\u200c]', '', text.lower())
@@ -145,19 +147,35 @@ async def scan_sponsor_channel(client, sponsor_entity, source_channel_name, curr
 
 
 async def handle_bot_interaction(client, bot_username, start_param, source_channel, source_post_id, depth=1):
-    """مدیریت هوشمند ربات‌های آپلودر و کلیک دقیق روی بررسی عضویت"""
-    global SPONSOR_LINKS_ARCHIVE
+    """ مدیریت هوشمند ربات‌های واسطه، دور زدن جوین اجباری و کنترل محدودیت‌های تلگرام """
+    global SPONSOR_LINKS_ARCHIVE, VISITED_BOT_PARAMS
+    
+    unique_id = f"{bot_username}_{start_param}"
+    if unique_id in VISITED_BOT_PARAMS:
+        print(f"{'  '*depth}♻️ اسکیپ شد: این ربات و پارامتر قبلاً بررسی شده است (@{bot_username}).")
+        return
+        
+    VISITED_BOT_PARAMS.add(unique_id)
     print(f"{'  '*depth}🤖 درگیری با ربات واسطه: @{bot_username} (عمق: {depth})")
     joined_entities = []
     
     try:
-        # ارسال استارت اولیه
-        sent_msg = await client.send_message(bot_username, f"/start {start_param}")
-        await asyncio.sleep(3)
+        # ارسال استارت با کنترل محدودیت تلگرام (FloodWait)
+        try:
+            sent_msg = await client.send_message(bot_username, f"/start {start_param}")
+        except FloodWaitError as e:
+            print(f"{'  '*depth}🛑 تلگرام عصبانی شد! باید {e.seconds} ثانیه صبر کنیم.")
+            if e.seconds < 60:
+                await asyncio.sleep(e.seconds + 2)
+                sent_msg = await client.send_message(bot_username, f"/start {start_param}")
+            else:
+                print(f"{'  '*depth}⏭️ زمان انتظار خیلی بالاست. این ربات رو رد می‌کنیم.")
+                return
 
-        # دریافت آخرین پیام ربات
+        await asyncio.sleep(4) # صبر طبیعی مثل انسان
+
         bot_response = None
-        async for m in client.iter_messages(bot_username, limit=1):
+        async for m in client.iter_messages(bot_username, limit=2):
             if m.id != sent_msg.id:
                 bot_response = m
                 break
@@ -168,18 +186,25 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
 
         text = bot_response.text or ""
         
-        # سپر امنیتی: فرار از تله شماره موبایل
+        # سپر امنیتی ۱: فرار از تله شماره موبایل
         if any(w in text for w in ["شماره", "احراز هویت", "ارسال شماره", "phone", "مخاطب"]):
             print(f"{'  '*depth}🛑 هشدار! ربات @{bot_username} تله شماره تلفن دارد. اسکیپ شد.")
             return
 
-        # بررسی وجود دکمه‌ها
+        # 🎯 شکارچی لینک‌های مخفی در متن (حل مشکل شماره ۴)
+        text_links = re.findall(r'(https?://t\.me/[^\s]+)', text)
+        for link in text_links:
+            print(f"{'  '*depth}🔗 یک لینک مستقیم تو متن ربات پیدا شد: {link}")
+            if TARGET_CHANNEL and not "start=" in link:
+                tags = extract_tags(text)
+                send_to_telegram("لینک کشف شده از متن ربات", link, tags, f"{source_channel} (از چنگ @{bot_username})")
+
+        # بررسی وجود دکمه‌ها برای جوین اجباری
         if bot_response.reply_markup and hasattr(bot_response.reply_markup, 'rows'):
-            verify_button_coords = None  # ذخیره سطر و ستون دکمه
+            verify_button_coords = None
             
             for row_idx, row in enumerate(bot_response.reply_markup.rows):
                 for col_idx, btn in enumerate(row.buttons):
-                    # اگر لینک جوین بود:
                     if hasattr(btn, 'url') and btn.url:
                         SPONSOR_LINKS_ARCHIVE.add(btn.url)
                         
@@ -187,62 +212,51 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
                         pub_match = re.search(r't\.me/([a-zA-Z0-9_]+)$', btn.url)
                         target_entity = None
 
-                        if priv_match:
-                            inv_hash = priv_match.group(1)
-                            try:
+                        try:
+                            if priv_match:
+                                inv_hash = priv_match.group(1)
                                 updates = await client(ImportChatInviteRequest(inv_hash))
                                 if hasattr(updates, 'chats') and updates.chats:
                                     target_entity = updates.chats[0].id
                                     joined_entities.append(target_entity)
-                                await asyncio.sleep(1.5)
-                            except UserAlreadyParticipantError:
-                                pass
-                            except Exception as e:
-                                print(f"{'  '*depth}⚠️ خطا در جوین پرایوت: {e}")
+                                await asyncio.sleep(2)
 
-                        elif pub_match:
-                            target_c = pub_match.group(1)
-                            if not target_c.lower().endswith('bot'):
-                                try:
+                            elif pub_match:
+                                target_c = pub_match.group(1)
+                                if not target_c.lower().endswith('bot'):
                                     await client(JoinChannelRequest(target_c))
                                     target_entity = target_c
                                     joined_entities.append(target_entity)
-                                    await asyncio.sleep(1.5)
-                                except UserAlreadyParticipantError:
-                                    pass
-                                except Exception as e:
-                                    print(f"{'  '*depth}⚠️ خطا در جوین @{target_c}: {e}")
+                                    await asyncio.sleep(2)
+                        except UserAlreadyParticipantError:
+                            pass
+                        except FloodWaitError as e:
+                            print(f"{'  '*depth}🛑 فلود ویت در جوین! {e.seconds} ثانیه...")
+                            await asyncio.sleep(e.seconds)
+                        except Exception as e:
+                            print(f"{'  '*depth}⚠️ خطا در جوین: {e}")
 
-                        # اسکن محتوای داخل اسپانسر
                         if target_entity:
                             await scan_sponsor_channel(client, target_entity, source_channel, depth)
 
-                    # پیدا کردن دکمه تایید / بررسی عضویت
                     btn_text = getattr(btn, 'text', '')
                     if any(kw in btn_text for kw in ["بررسی", "تایید", "عضو شدم", "دریافت"]):
                         verify_button_coords = (row_idx, col_idx)
 
-            # 🔘 کلیک تضمینی روی دکمه بررسی عضویت
             if verify_button_coords is not None:
                 r_idx, c_idx = verify_button_coords
-                print(f"{'  '*depth}🔘 در حال فشردن دکمه «بررسی عضویت» با دقت بالا...")
+                print(f"{'  '*depth}🔘 در حال فشردن دکمه «بررسی عضویت»...")
                 try:
-                    # روش مطمئن Telethon برای کلیک روی دکمه اینلاین
                     await bot_response.click(r_idx, c_idx)
-                except Exception as click_err:
-                    print(f"{'  '*depth}⚠️ کلیک ایندکسی با خطا مواجه شد، تست کلیک متنی: {click_err}")
+                except:
                     try:
                         await bot_response.click(text=bot_response.reply_markup.rows[r_idx].buttons[c_idx].text)
-                    except Exception as e2:
-                        print(f"{'  '*depth}❌ کلیک نشد: {e2}")
+                    except:
+                        pass
+                await asyncio.sleep(6) # زمان حیاتی برای سرور ربات
 
-                # ⏳ ربات‌های تلگرام برای چک کردن ساب‌اسکرایب حداقل به ۴ تا ۶ ثانیه زمان نیاز دارند
-                print(f"{'  '*depth}⏳ ۵ ثانیه صبر برای پردازش ربات...")
-                await asyncio.sleep(5)
-
-        # 🎯 بررسی دریافت فایل نهایی (خواندن پیام‌های بعد از تایید)
-        file_found = False
-        async for bot_msg in client.iter_messages(bot_username, limit=4):
+        # 🎯 بررسی دریافت فایل نهایی (پیام‌های بعد از تایید)
+        async for bot_msg in client.iter_messages(bot_username, limit=3):
             if bot_msg.document and bot_msg.document.mime_type == 'application/pdf':
                 b_file = "فایل_مخفی.pdf"
                 for attr in bot_msg.document.attributes:
@@ -256,16 +270,20 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
                 post_url = f"https://t.me/{source_channel}/{source_post_id}"
                 tags = extract_tags(b_file + " " + (bot_msg.text or ""))
                 send_to_telegram(b_file, post_url, tags, f"{source_channel} (از چنگ @{bot_username})")
-                file_found = True
                 break
-
-        if not file_found:
-            print(f"{'  '*depth}⚠️ فایلی دریافت نشد (شاید ربات ملکه فرح با تاخیر می‌فرسته یا هنوز دکمه رو نشناخته).")
+            
+            # شاید ربات فایل رو نداده و لینک دانلود فرستاده تو پیام جدید
+            elif bot_msg.text:
+                 text_links = re.findall(r'(https?://t\.me/[^\s]+)', bot_msg.text)
+                 for link in text_links:
+                    if not "start=" in link:
+                        print(f"{'  '*depth}🔗 لینک دانلود از پیام دوم ربات شکار شد: {link}")
+                        tags = extract_tags(bot_msg.text)
+                        send_to_telegram("لینک فایل (غیر مستقیم)", link, tags, f"ربات @{bot_username}")
 
     except Exception as e:
         print(f"{'  '*depth}⚠️ خطای پردازش ربات: {e}")
     finally:
-        # خروج تمیز از کانال‌ها
         for c in joined_entities:
             try:
                 await client(LeaveChannelRequest(c))
