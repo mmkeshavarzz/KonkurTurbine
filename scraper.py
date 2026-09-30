@@ -145,115 +145,134 @@ async def scan_sponsor_channel(client, sponsor_entity, source_channel_name, curr
 
 
 async def handle_bot_interaction(client, bot_username, start_param, source_channel, source_post_id, depth=1):
-    """ مدیریت هوشمند ربات‌های واسطه و دور زدن جوین اجباری + ذخیره لینک‌ها """
+    """مدیریت هوشمند ربات‌های آپلودر و کلیک دقیق روی بررسی عضویت"""
     global SPONSOR_LINKS_ARCHIVE
     print(f"{'  '*depth}🤖 درگیری با ربات واسطه: @{bot_username} (عمق: {depth})")
     joined_entities = []
     
     try:
-        await client.send_message(bot_username, f"/start {start_param}")
+        # ارسال استارت اولیه
+        sent_msg = await client.send_message(bot_username, f"/start {start_param}")
         await asyncio.sleep(3)
 
+        # دریافت آخرین پیام ربات
         bot_response = None
         async for m in client.iter_messages(bot_username, limit=1):
-            bot_response = m
-            break
+            if m.id != sent_msg.id:
+                bot_response = m
+                break
 
         if not bot_response:
+            print(f"{'  '*depth}⚠️ ربات پاسخی نداد.")
             return
 
         text = bot_response.text or ""
         
-        # ⚠️ سپر امنیتی ۱: فرار از تله شماره موبایل
+        # سپر امنیتی: فرار از تله شماره موبایل
         if any(w in text for w in ["شماره", "احراز هویت", "ارسال شماره", "phone", "مخاطب"]):
-            print(f"{'  '*depth}🛑 هشدار! ربات @{bot_username} تله شماره تلفن گذاشته. اسکیپ شد.")
+            print(f"{'  '*depth}🛑 هشدار! ربات @{bot_username} تله شماره تلفن دارد. اسکیپ شد.")
             return
 
-        # 📢 دور زدن قفل جوین اجباری (عمومی + خصوصی/گروه)
+        # بررسی وجود دکمه‌ها
         if bot_response.reply_markup and hasattr(bot_response.reply_markup, 'rows'):
-            verify_button = None
+            verify_button_coords = None  # ذخیره سطر و ستون دکمه
             
-            for row in bot_response.reply_markup.rows:
-                for btn in row.buttons:
+            for row_idx, row in enumerate(bot_response.reply_markup.rows):
+                for col_idx, btn in enumerate(row.buttons):
+                    # اگر لینک جوین بود:
                     if hasattr(btn, 'url') and btn.url:
-                        # اضافه کردن لینک به دیتابیس آرشیو
                         SPONSOR_LINKS_ARCHIVE.add(btn.url)
                         
                         priv_match = re.search(r't\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', btn.url)
                         pub_match = re.search(r't\.me/([a-zA-Z0-9_]+)$', btn.url)
-
                         target_entity = None
 
-                        # اگه لینک گروه پرایوت مثل همون "گپ فاک کلاس" بود:
                         if priv_match:
                             inv_hash = priv_match.group(1)
-                            print(f"{'  '*depth}🕵️‍♂️ لینک خصوصی پیدا شد! ورود شبانه به هش: {inv_hash}")
                             try:
                                 updates = await client(ImportChatInviteRequest(inv_hash))
                                 if hasattr(updates, 'chats') and updates.chats:
                                     target_entity = updates.chats[0].id
                                     joined_entities.append(target_entity)
-                                await asyncio.sleep(2)
+                                await asyncio.sleep(1.5)
                             except UserAlreadyParticipantError:
-                                print(f"{'  '*depth}✅ از قبل تو این گپ پرایوت بودیم.")
+                                pass
                             except Exception as e:
-                                print(f"{'  '*depth}⚠️ نتونست وارد گروه پرایوت بشه: {e}")
+                                print(f"{'  '*depth}⚠️ خطا در جوین پرایوت: {e}")
 
-                        # اگه کانال عمومی بود:
                         elif pub_match:
                             target_c = pub_match.group(1)
                             if not target_c.lower().endswith('bot'):
-                                print(f"{'  '*depth}➕ عضویت موقت در کانال عمومی: @{target_c}")
                                 try:
                                     await client(JoinChannelRequest(target_c))
                                     target_entity = target_c
                                     joined_entities.append(target_entity)
-                                    await asyncio.sleep(2)
+                                    await asyncio.sleep(1.5)
                                 except UserAlreadyParticipantError:
                                     pass
                                 except Exception as e:
-                                    print(f"{'  '*depth}⚠️ خطا تو عضویت @{target_c}: {e}")
-                        
-                        # 🚜 اگر با موفقیت جوین شدیم، حالا وقت شخم زدن اسپانسره!
+                                    print(f"{'  '*depth}⚠️ خطا در جوین @{target_c}: {e}")
+
+                        # اسکن محتوای داخل اسپانسر
                         if target_entity:
                             await scan_sponsor_channel(client, target_entity, source_channel, depth)
 
+                    # پیدا کردن دکمه تایید / بررسی عضویت
                     btn_text = getattr(btn, 'text', '')
                     if any(kw in btn_text for kw in ["بررسی", "تایید", "عضو شدم", "دریافت"]):
-                        verify_button = btn
+                        verify_button_coords = (row_idx, col_idx)
 
-            if verify_button and hasattr(verify_button, 'data'):
-                print(f"{'  '*depth}🔘 فشردن دکمه تایید عضویت...")
-                await bot_response.click(data=verify_button.data)
-                await asyncio.sleep(4)
+            # 🔘 کلیک تضمینی روی دکمه بررسی عضویت
+            if verify_button_coords is not None:
+                r_idx, c_idx = verify_button_coords
+                print(f"{'  '*depth}🔘 در حال فشردن دکمه «بررسی عضویت» با دقت بالا...")
+                try:
+                    # روش مطمئن Telethon برای کلیک روی دکمه اینلاین
+                    await bot_response.click(r_idx, c_idx)
+                except Exception as click_err:
+                    print(f"{'  '*depth}⚠️ کلیک ایندکسی با خطا مواجه شد، تست کلیک متنی: {click_err}")
+                    try:
+                        await bot_response.click(text=bot_response.reply_markup.rows[r_idx].buttons[c_idx].text)
+                    except Exception as e2:
+                        print(f"{'  '*depth}❌ کلیک نشد: {e2}")
 
-        async for bot_msg in client.iter_messages(bot_username, limit=2):
+                # ⏳ ربات‌های تلگرام برای چک کردن ساب‌اسکرایب حداقل به ۴ تا ۶ ثانیه زمان نیاز دارند
+                print(f"{'  '*depth}⏳ ۵ ثانیه صبر برای پردازش ربات...")
+                await asyncio.sleep(5)
+
+        # 🎯 بررسی دریافت فایل نهایی (خواندن پیام‌های بعد از تایید)
+        file_found = False
+        async for bot_msg in client.iter_messages(bot_username, limit=4):
             if bot_msg.document and bot_msg.document.mime_type == 'application/pdf':
                 b_file = "فایل_مخفی.pdf"
                 for attr in bot_msg.document.attributes:
                     if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
                         b_file = attr.file_name
                 
-                print(f"{'  '*depth}🎯 پاداش! فایل مخفی گرفته شد: {b_file}")
+                print(f"{'  '*depth}🎯 شکار شد! فایل تحویل گرفته شد: {b_file}")
                 if TARGET_CHANNEL:
                     await client.forward_messages(TARGET_CHANNEL, bot_msg)
                 
                 post_url = f"https://t.me/{source_channel}/{source_post_id}"
                 tags = extract_tags(b_file + " " + (bot_msg.text or ""))
                 send_to_telegram(b_file, post_url, tags, f"{source_channel} (از چنگ @{bot_username})")
+                file_found = True
                 break
 
+        if not file_found:
+            print(f"{'  '*depth}⚠️ فایلی دریافت نشد (شاید ربات ملکه فرح با تاخیر می‌فرسته یا هنوز دکمه رو نشناخته).")
+
     except Exception as e:
-        print(f"{'  '*depth}⚠️ خطای ربات واسطه: {e}")
+        print(f"{'  '*depth}⚠️ خطای پردازش ربات: {e}")
     finally:
-        # 🧹 پاکسازی: لفت دادن نامحسوس
+        # خروج تمیز از کانال‌ها
         for c in joined_entities:
             try:
-                print(f"{'  '*depth}➖ خروج خودکار از اسپانسر: {c}")
                 await client(LeaveChannelRequest(c))
                 await asyncio.sleep(1)
             except:
                 pass
+
 
 async def main():
     print("🦖 موتور Inception توربین با قابلیت رخنه به گپ‌های خصوصی فعال شد!")
