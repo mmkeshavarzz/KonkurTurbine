@@ -3,12 +3,12 @@
 *  Project: Konkur PDF Hunter 🎓 (INCEPTION & FORCE-JOIN EDITION 🥷)
 *  Author: mm.keshavarzz | Supercharged by Senior AI 👨‍💻
 *  Features:
+*    - 🎒 Global Delayed Cleanup (لفت دادن یکجا در انتهای کار برای دور زدن هوش ربات)
+*    - 🛡️ Protector Shield Breaker (عبور از کانال‌های واسطه و نفوذ به لینک‌های مخفی داخلی)
 *    - Auto-Join Sponsor Channels & Private Groups (لینک‌های t.me/+ و joinchat) 📢
 *    - Sponsor Scanner (شخم زدن کانال‌های اسپانسر برای فایل) 🚜
 *    - Inception Bot-in-Bot (ورود به رباتِ داخل کانالِ اسپانسر تا عمق مشخص) 🌀
-*    - Auto-Save Sponsor Links in /channels/YYYY-MM-DD.txt 📁
-*    - Auto-Leave (لفت دادن سریع برای تمیز ماندن اکانت) 🧹
-*    - Anti-PhoneTrap Shield (فرار از تله ارسال شماره تلفن) 🛡️
+*    - Anti-PhoneTrap Shield (فرار از تله ارسال شماره تلفن) 🛑
 =============================================================================
 """
 
@@ -62,9 +62,10 @@ SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TARGET_CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "")
 
-# 🌐 دیتابیس موقت برای ذخیره لینک‌های اسپانسر پیدا شده
+# 🌐 دیتابیس‌های سراسری برنامه
 SPONSOR_LINKS_ARCHIVE = set()
-VISITED_BOT_PARAMS = set() # دیتابیس موقت برای جلوگیری از استارت‌های تکراری
+VISITED_BOT_PARAMS = set() 
+GLOBAL_JOINED_CHANNELS = set() # 🎒 کوله‌پشتی کانال‌هایی که عضو شدیم برای لفتِ پایانی!
 
 
 def extract_tags(text: str):
@@ -106,20 +107,42 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
     except Exception as e:
         print(f"❌ خطا در ارسال بنر: {e}")
 
+async def try_join_private_link(client, link, depth_str=""):
+    """ تلاش برای نفوذ به لینک‌های جوین‌چت و پرایوت """
+    priv_match = re.search(r't\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', link)
+    if priv_match:
+        inv_hash = priv_match.group(1)
+        try:
+            res = await client(ImportChatInviteRequest(inv_hash))
+            if hasattr(res, 'chats') and res.chats:
+                ch_id = res.chats[0].id
+                GLOBAL_JOINED_CHANNELS.add(ch_id)
+                print(f"{depth_str}🥷 با موفقیت به کانال مخفی نفوذ کردیم!")
+            await asyncio.sleep(2)
+        except UserAlreadyParticipantError:
+            pass # از قبل عضو بودیم، فدای سرمون!
+        except FloodWaitError as e:
+            print(f"{depth_str}🛑 فلود ویت در جوین پرایوت! {e.seconds} ثانیه...")
+            await asyncio.sleep(e.seconds)
+        except Exception as e:
+            print(f"{depth_str}⚠️ خطا در ورود به لینک مخفی: {e}")
+
 async def scan_sponsor_channel(client, sponsor_entity, source_channel_name, current_depth):
-    """ جستجو داخل کانال/گروه اسپانسر (شخم زدن خواب لایه دوم) """
-    print(f"   🔍 در حال اسکن اسپانسر: {sponsor_entity} (عمق: {current_depth})")
+    """ جستجو داخل کانال اسپانسر و شکستن طلسم کانال‌های واسطه (Protector Channels) """
+    depth_str = '  ' * current_depth
+    print(f"{depth_str}🔍 در حال اسکن اسپانسر: {sponsor_entity} (عمق: {current_depth})")
+    
     try:
-        # فقط 20 پیام آخر اسپانسر رو می‌خونیم که تلگرام بلاک نکنه
-        async for msg in client.iter_messages(sponsor_entity, limit=20):
-            # شکار فایل مستقیم تو کانال اسپانسر
+        # فقط 10 پیام آخر اسپانسر رو می‌خونیم
+        async for msg in client.iter_messages(sponsor_entity, limit=10):
+            # 🎯 ۱. شکار فایل مستقیم
             if msg.document and msg.document.mime_type == 'application/pdf':
                 file_name = "فایل_اسپانسر.pdf"
                 for attr in msg.document.attributes:
                     if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
                         file_name = attr.file_name
                 
-                print(f"   🎯 فایل تو خود اسپانسر شکار شد! {file_name}")
+                print(f"{depth_str}🎯 فایل تو خود اسپانسر شکار شد! {file_name}")
                 if TARGET_CHANNEL:
                     await client.forward_messages(TARGET_CHANNEL, msg)
                 
@@ -128,9 +151,17 @@ async def scan_sponsor_channel(client, sponsor_entity, source_channel_name, curr
                 send_to_telegram(file_name, post_url, tags, f"اسپانسرِ {source_channel_name}")
                 continue
 
-            # اگر عمق هنوز جا داره (عمق 1)، ربات‌های داخل اسپانسر رو هم می‌زنیم!
+            # 🛡️ ۲. شکستن طلسم کانال محافظ (پیدا کردن لینک‌های جوین‌چت در کانال‌های عمومی)
+            text = msg.text or ""
+            priv_links = re.findall(r'(https?://t\.me/(?:\+|joinchat/)[a-zA-Z0-9_-]+)', text)
+            for pl in priv_links:
+                print(f"{depth_str}🛡️ لینک کانال اصلی (پشت واسطه) کشف شد! در حال نفوذ...")
+                SPONSOR_LINKS_ARCHIVE.add(pl)
+                await try_join_private_link(client, pl, depth_str + '  ')
+
+            # 🌀 ۳. پیدا کردن ربات‌های تو در تو
             if current_depth < 2:
-                search_text = msg.text or ""
+                search_text = text
                 if msg.reply_markup and hasattr(msg.reply_markup, 'rows'):
                     for row in msg.reply_markup.rows:
                         for btn in row.buttons:
@@ -139,67 +170,58 @@ async def scan_sponsor_channel(client, sponsor_entity, source_channel_name, curr
 
                 bot_links = re.findall(r't\.me/([a-zA-Z0-9_]+)\?start=([a-zA-Z0-9_-]+)', search_text)
                 for b_user, s_param in bot_links:
-                    print(f"   🌀 ورود به ربات تو در تو! پیدا شده در اسپانسر...")
+                    print(f"{depth_str}🌀 ورود به ربات تو در تو! پیدا شده در اسپانسر...")
                     await handle_bot_interaction(client, b_user, s_param, f"اسپانسرِ {source_channel_name}", msg.id, current_depth + 1)
                     await asyncio.sleep(2)
     except Exception as e:
-        print(f"   ⚠️ خطا در اسکن اسپانسر {sponsor_entity}: {e}")
-
+        print(f"{depth_str}⚠️ خطا در اسکن اسپانسر {sponsor_entity}: {e}")
 
 async def handle_bot_interaction(client, bot_username, start_param, source_channel, source_post_id, depth=1):
-    """ مدیریت هوشمند ربات‌های واسطه، دور زدن جوین اجباری و کنترل محدودیت‌های تلگرام """
-    global SPONSOR_LINKS_ARCHIVE, VISITED_BOT_PARAMS
+    """ مدیریت ربات‌های واسطه، جوین اجباری و کلیک با حوصله! """
+    global SPONSOR_LINKS_ARCHIVE, VISITED_BOT_PARAMS, GLOBAL_JOINED_CHANNELS
     
     unique_id = f"{bot_username}_{start_param}"
     if unique_id in VISITED_BOT_PARAMS:
-        print(f"{'  '*depth}♻️ اسکیپ شد: این ربات و پارامتر قبلاً بررسی شده است (@{bot_username}).")
+        print(f"{'  '*depth}♻️ اسکیپ شد: این ربات (@{bot_username}) تکراری است.")
         return
         
     VISITED_BOT_PARAMS.add(unique_id)
-    print(f"{'  '*depth}🤖 درگیری با ربات واسطه: @{bot_username} (عمق: {depth})")
-    joined_entities = []
+    print(f"{'  '*depth}🤖 درگیری با ربات واسطه: @{bot_username}")
     
     try:
-        # ارسال استارت با کنترل محدودیت تلگرام (FloodWait)
         try:
             sent_msg = await client.send_message(bot_username, f"/start {start_param}")
         except FloodWaitError as e:
-            print(f"{'  '*depth}🛑 تلگرام عصبانی شد! باید {e.seconds} ثانیه صبر کنیم.")
             if e.seconds < 60:
                 await asyncio.sleep(e.seconds + 2)
                 sent_msg = await client.send_message(bot_username, f"/start {start_param}")
             else:
-                print(f"{'  '*depth}⏭️ زمان انتظار خیلی بالاست. این ربات رو رد می‌کنیم.")
                 return
 
-        await asyncio.sleep(4) # صبر طبیعی مثل انسان
+        await asyncio.sleep(4) 
 
         bot_response = None
-        async for m in client.iter_messages(bot_username, limit=2):
+        async for m in client.iter_messages(bot_username, limit=3):
             if m.id != sent_msg.id:
                 bot_response = m
                 break
 
         if not bot_response:
-            print(f"{'  '*depth}⚠️ ربات پاسخی نداد.")
             return
 
         text = bot_response.text or ""
-        
-        # سپر امنیتی ۱: فرار از تله شماره موبایل
         if any(w in text for w in ["شماره", "احراز هویت", "ارسال شماره", "phone", "مخاطب"]):
-            print(f"{'  '*depth}🛑 هشدار! ربات @{bot_username} تله شماره تلفن دارد. اسکیپ شد.")
+            print(f"{'  '*depth}🛑 تله شماره موبایل! اسکیپ شد.")
             return
 
-        # 🎯 شکارچی لینک‌های مخفی در متن (حل مشکل شماره ۴)
+        # پیدا کردن لینک‌های دانلود مستقیم توی متن پیام
         text_links = re.findall(r'(https?://t\.me/[^\s]+)', text)
         for link in text_links:
-            print(f"{'  '*depth}🔗 یک لینک مستقیم تو متن ربات پیدا شد: {link}")
             if TARGET_CHANNEL and not "start=" in link:
                 tags = extract_tags(text)
                 send_to_telegram("لینک کشف شده از متن ربات", link, tags, f"{source_channel} (از چنگ @{bot_username})")
 
-        # بررسی وجود دکمه‌ها برای جوین اجباری
+        # پردازش دکمه‌ها (عضویت‌ها)
         if bot_response.reply_markup and hasattr(bot_response.reply_markup, 'rows'):
             verify_button_coords = None
             
@@ -214,28 +236,20 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
 
                         try:
                             if priv_match:
-                                inv_hash = priv_match.group(1)
-                                updates = await client(ImportChatInviteRequest(inv_hash))
-                                if hasattr(updates, 'chats') and updates.chats:
-                                    target_entity = updates.chats[0].id
-                                    joined_entities.append(target_entity)
-                                await asyncio.sleep(2)
-
+                                await try_join_private_link(client, btn.url, '  '*depth)
                             elif pub_match:
                                 target_c = pub_match.group(1)
                                 if not target_c.lower().endswith('bot'):
                                     await client(JoinChannelRequest(target_c))
                                     target_entity = target_c
-                                    joined_entities.append(target_entity)
+                                    GLOBAL_JOINED_CHANNELS.add(target_entity)
                                     await asyncio.sleep(2)
                         except UserAlreadyParticipantError:
                             pass
-                        except FloodWaitError as e:
-                            print(f"{'  '*depth}🛑 فلود ویت در جوین! {e.seconds} ثانیه...")
-                            await asyncio.sleep(e.seconds)
                         except Exception as e:
                             print(f"{'  '*depth}⚠️ خطا در جوین: {e}")
 
+                        # اگه کانال عمومی بود، سریع اسکنش می‌کنیم تا لینک‌های پرایوت مخفی (واسطه‌ها) رو پیدا کنیم!
                         if target_entity:
                             await scan_sponsor_channel(client, target_entity, source_channel, depth)
 
@@ -243,19 +257,23 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
                     if any(kw in btn_text for kw in ["بررسی", "تایید", "عضو شدم", "دریافت"]):
                         verify_button_coords = (row_idx, col_idx)
 
+            # دکمه بررسی عضویت رو با Timeout ایمن فشار میدیم
             if verify_button_coords is not None:
                 r_idx, c_idx = verify_button_coords
                 print(f"{'  '*depth}🔘 در حال فشردن دکمه «بررسی عضویت»...")
                 try:
-                    await bot_response.click(r_idx, c_idx)
-                except:
-                    try:
-                        await bot_response.click(text=bot_response.reply_markup.rows[r_idx].buttons[c_idx].text)
-                    except:
-                        pass
-                await asyncio.sleep(6) # زمان حیاتی برای سرور ربات
+                    await asyncio.wait_for(
+                        bot_response.click(r_idx, c_idx),
+                        timeout=12.0
+                    )
+                except asyncio.TimeoutError:
+                    print(f"{'  '*depth}⏳ تایم‌اوت در کلیک (احتمالاً ربات در حال پردازش است).")
+                except Exception as click_err:
+                    print(f"{'  '*depth}⚠️ مشکل در کلیک دکمه: {click_err}")
+                
+                await asyncio.sleep(6) # صبر برای ارسال فایل
 
-        # 🎯 بررسی دریافت فایل نهایی (پیام‌های بعد از تایید)
+        # بررسی پیام‌های جدید برای صید فایل
         async for bot_msg in client.iter_messages(bot_username, limit=3):
             if bot_msg.document and bot_msg.document.mime_type == 'application/pdf':
                 b_file = "فایل_مخفی.pdf"
@@ -272,24 +290,38 @@ async def handle_bot_interaction(client, bot_username, start_param, source_chann
                 send_to_telegram(b_file, post_url, tags, f"{source_channel} (از چنگ @{bot_username})")
                 break
             
-            # شاید ربات فایل رو نداده و لینک دانلود فرستاده تو پیام جدید
-            elif bot_msg.text:
+            elif bot_msg.text and bot_msg.id != sent_msg.id:
                  text_links = re.findall(r'(https?://t\.me/[^\s]+)', bot_msg.text)
                  for link in text_links:
                     if not "start=" in link:
-                        print(f"{'  '*depth}🔗 لینک دانلود از پیام دوم ربات شکار شد: {link}")
                         tags = extract_tags(bot_msg.text)
                         send_to_telegram("لینک فایل (غیر مستقیم)", link, tags, f"ربات @{bot_username}")
 
     except Exception as e:
         print(f"{'  '*depth}⚠️ خطای پردازش ربات: {e}")
-    finally:
-        for c in joined_entities:
-            try:
-                await client(LeaveChannelRequest(c))
-                await asyncio.sleep(1)
-            except:
-                pass
+    # 🔴 اینجا دیگه لفت نمی‌دیم! لفت دادن رفت برای آخرِ آخر برنامه!
+
+
+async def cleanup_all_joined_channels(client):
+    """ 🧹 پاکسازی بزرگ در انتهای برنامه """
+    global GLOBAL_JOINED_CHANNELS
+    if not GLOBAL_JOINED_CHANNELS:
+        return
+        
+    print(f"\n🚪 عملیات پاکسازی: در حال خروج یکجا از {len(GLOBAL_JOINED_CHANNELS)} چت/کانال...")
+    for ch in list(GLOBAL_JOINED_CHANNELS):
+        try:
+            await client(LeaveChannelRequest(ch))
+            print(f"👋 خروج موفق از: {ch}")
+            await asyncio.sleep(2)
+        except FloodWaitError as e:
+            print(f"🛑 فلود ویت در زمان خروج! {e.seconds} ثانیه...")
+            await asyncio.sleep(e.seconds)
+        except Exception:
+            pass # باگ‌های جزئی خروج رو ایگنور می‌کنیم
+            
+    GLOBAL_JOINED_CHANNELS.clear()
+    print("✨ تمام ردپاهای ربات پاک شد!")
 
 
 async def main():
@@ -302,58 +334,58 @@ async def main():
     await client.start()
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-    for ch in CHANNELS:
-        ch_clean = ch.replace('@', '')
-        print(f"\n🚜 شخم زدن منبع اصلی: @{ch_clean}")
+    try:
+        for ch in CHANNELS:
+            ch_clean = ch.replace('@', '')
+            print(f"\n🚜 شخم زدن منبع اصلی: @{ch_clean}")
 
-        try:
-            async for msg in client.iter_messages(ch_clean, limit=1000):
-                if msg.date < week_ago:
-                    break
+            try:
+                async for msg in client.iter_messages(ch_clean, limit=1000):
+                    if msg.date < week_ago:
+                        break
 
-                if msg.document and msg.document.mime_type == 'application/pdf':
-                    file_name = "فایل.pdf"
-                    for attr in msg.document.attributes:
-                        if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
-                            file_name = attr.file_name
-                    
-                    tags = extract_tags(file_name + " " + (msg.text or ""))
-                    post_url = f"https://t.me/{ch_clean}/{msg.id}"
-                    send_to_telegram(file_name, post_url, tags, ch_clean)
-                    continue
+                    if msg.document and msg.document.mime_type == 'application/pdf':
+                        file_name = "فایل.pdf"
+                        for attr in msg.document.attributes:
+                            if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
+                                file_name = attr.file_name
+                        
+                        tags = extract_tags(file_name + " " + (msg.text or ""))
+                        post_url = f"https://t.me/{ch_clean}/{msg.id}"
+                        send_to_telegram(file_name, post_url, tags, ch_clean)
+                        continue
 
-                search_text = msg.text or ""
-                if msg.reply_markup and hasattr(msg.reply_markup, 'rows'):
-                    for row in msg.reply_markup.rows:
-                        for btn in row.buttons:
-                            if hasattr(btn, 'url') and btn.url:
-                                search_text += f" {btn.url} "
+                    search_text = msg.text or ""
+                    if msg.reply_markup and hasattr(msg.reply_markup, 'rows'):
+                        for row in msg.reply_markup.rows:
+                            for btn in row.buttons:
+                                if hasattr(btn, 'url') and btn.url:
+                                    search_text += f" {btn.url} "
 
-                bot_links = re.findall(r't\.me/([a-zA-Z0-9_]+)\?start=([a-zA-Z0-9_-]+)', search_text)
-                for b_user, s_param in bot_links:
-                    # شروع چرخه با عمق 1
-                    await handle_bot_interaction(client, b_user, s_param, ch_clean, msg.id, depth=1)
-                    await asyncio.sleep(2)
+                    bot_links = re.findall(r't\.me/([a-zA-Z0-9_]+)\?start=([a-zA-Z0-9_-]+)', search_text)
+                    for b_user, s_param in bot_links:
+                        await handle_bot_interaction(client, b_user, s_param, ch_clean, msg.id, depth=1)
+                        await asyncio.sleep(2)
 
-        except Exception as e:
-            print(f"❌ خطا در کانال @{ch_clean}: {e}")
+            except Exception as e:
+                print(f"❌ خطا در کانال @{ch_clean}: {e}")
 
-    # 💾 ذخیره سازی لینک‌های اسپانسر در پوشه channels
-    if SPONSOR_LINKS_ARCHIVE:
-        os.makedirs("channels", exist_ok=True)
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        file_path = os.path.join("channels", f"sponsor_links_{today_str}.txt")
-        with open(file_path, "w", encoding="utf-8") as f:
-            for link in sorted(SPONSOR_LINKS_ARCHIVE):
-                f.write(link + "\n")
-        print(f"\n📁 موفقیت: {len(SPONSOR_LINKS_ARCHIVE)} لینک اسپانسر در فایل {file_path} آرشیو شد تا بعداً بررسیشون کنی.")
+        # 💾 آرشیو لینک‌ها
+        if SPONSOR_LINKS_ARCHIVE:
+            os.makedirs("channels", exist_ok=True)
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            file_path = os.path.join("channels", f"sponsor_links_{today_str}.txt")
+            with open(file_path, "w", encoding="utf-8") as f:
+                for link in sorted(SPONSOR_LINKS_ARCHIVE):
+                    f.write(link + "\n")
+            print(f"\n📁 موفقیت: {len(SPONSOR_LINKS_ARCHIVE)} لینک اسپانسر ذخیره شد.")
 
-    print("\n🏁 اسکن به اتمام رسید.")
+        print("\n🏁 اسکن به اتمام رسید.")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    finally:
+        # 🧼 اینجا هر اتفاقی بیفته، حتی اگر وسط کار ارور بده، میاد و لفت میده!
+        await cleanup_all_joined_channels(client)
 
-    print("\n🏁 اسکن به اتمام رسید.")
 
 if __name__ == "__main__":
     asyncio.run(main())
