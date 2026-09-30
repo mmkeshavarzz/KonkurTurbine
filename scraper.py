@@ -1,12 +1,12 @@
 """
 =============================================================================
-*  Project: Konkur PDF Hunter 🎓 (DEEP DIVER EDITION 🌊)
+*  Project: Konkur PDF Hunter 🎓 (BULLDOZER EDITION 🚜)
 *  Author: mm.keshavarzz | Supercharged by Senior AI 👨‍💻
 *  Features:
-*    - Deep Pagination (ورق زدن کانال تا رسیدن به محدودیت زمانی) 📚
-*    - Anti-503 Error System (دور زدن محدودیت‌های تلگرام) 🛡️
+*    - 1000-Message Deep Scan (شخم زدن ۱۰۰۰ پیام آخر بدون توقف) 📚
+*    - Anti-Pinned-Message Trap (جاخالی دادن از پیام‌های پین‌شده قدیمی) 🕳️
+*    - Smart Date Filter (جدا کردن فایل‌های ۷ روز اخیر از دل تاریخچه) ⏳
 *    - Ultra-Beautiful HTML Telegram Messages ✨
-*    - Smart Regex Categorization 🧠
 =============================================================================
 """
 
@@ -69,7 +69,7 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
     if not bot_token or not channel_id:
         return
 
-    # 🎨 دیزاین جدید، خفن و لاکچری با استفاده از HTML و Blockquote
+    # 🎨 دیزاین خفن و لاکچری پیام‌ها تو تلگرام
     reshteh = f"🎓 <b>رشته:</b> {' | '.join(tags['رشته'])}" if tags['رشته'] else ""
     azmoon = f"📝 <b>آزمون:</b> {' | '.join(tags['آزمون'])}" if tags['آزمون'] else ""
     dars = f"📚 <b>درس:</b> {' | '.join(tags['درس'])}" if tags['درس'] else ""
@@ -85,89 +85,72 @@ def send_to_telegram(file_title, post_url, tags, source_channel):
         f"<blockquote>{file_title}</blockquote>\n"
         f"{details}"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📡 <b>منبع اصلی:</b> @{source_channel}\n"
-        f"📥 <a href='{post_url}'>[ ☁️ کلیک برای دانلود مستقیم فایل ]</a>"
+        f"📡 <b>منبع:</b> @{source_channel}\n"
+        f"📥 <a href='{post_url}'>[ ☁️ دانلود مستقیم فایل ]</a>"
     )
 
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {
-            "chat_id": channel_id, 
-            "text": msg, 
-            "parse_mode": "HTML", 
-            "disable_web_page_preview": True
-        }
+        payload = {"chat_id": channel_id, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"❌ خطا در ارسال به تلگرام: {e}")
 
 def main():
-    print("🚀 زیردریایی توربین روشن شد! در حال غواصی در کانال‌ها...")
+    print("🚜 بولدوزر توربین روشن شد! هدف: شخم زدن ۱۰۰۰ پیام آخر هر کانال...")
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
 
-    # استفاده از Session برای پایداری بیشتر کانکشن‌ها
     session = requests.Session()
     session.headers.update(HEADERS)
 
     for ch in CHANNELS:
         ch = ch.replace('@', '')
-        print(f"\n🌊 در حال غواصی عمیق در کانال: @{ch}")
+        print(f"\n🚜 در حال شخم زدن عمیق کانال: @{ch}")
         base_url = f"https://t.me/s/{ch}"
         current_url = base_url
         
         keep_scraping = True
         pages_scraped = 0
         total_files_in_channel = 0
+        MAX_PAGES = 50 # 50 صفحات * 20 پیام = حدود 1000 پیام بررسی میشه
 
-        while keep_scraping and pages_scraped < 100: # لیمیت ۱۰۰ صفحه برای جلوگیری از گیر افتادن
+        while keep_scraping and pages_scraped < MAX_PAGES:
             try:
                 res = session.get(current_url, timeout=15)
-                
-                # 🛡️ سیستم ضد ارور 503 (در صورتی که تلگرام خسته بشه)
                 if res.status_code == 503:
-                    print("⚠️ تلگرام ارور 503 داد! 10 ثانیه استراحت تاکتیکی...")
+                    print("⚠️ تلگرام خسته شد (ارور 503)! 10 ثانیه استراحت تاکتیکی...")
                     time.sleep(10)
                     continue
-                
                 if res.status_code != 200:
                     break
                     
                 soup = BeautifulSoup(res.text, 'html.parser')
                 messages = soup.find_all('div', class_='tgme_widget_message')
-                
                 if not messages:
                     break
 
-                min_post_id = None
-                oldest_date_in_page = now
+                valid_ids = []
 
                 for msg in messages:
-                    # پیدا کردن ID برای ورق زدن به صفحه قبل
+                    # ۱. گرفتن آیدی پیام برای ورق زدن
                     post_id_str = msg.get('data-post')
                     if post_id_str:
-                        try:
-                            msg_id = int(post_id_str.split('/')[-1])
-                            if min_post_id is None or msg_id < min_post_id:
-                                min_post_id = msg_id
+                        try: valid_ids.append(int(post_id_str.split('/')[-1]))
                         except: pass
 
-                    # بررسی زمان
+                    # ۲. بررسی تاریخ پیام (فقط فایل‌های این هفته رو می‌فرستیم تا اسپم نشه)
                     time_tag = msg.find('time', class_='time')
-                    if not time_tag: continue
-                    
-                    try:
-                        post_time = datetime.fromisoformat(time_tag.get('datetime'))
-                        if post_time < oldest_date_in_page:
-                            oldest_date_in_page = post_time
-                            
-                        # اگه پیام مال قبل از یک هفته پیشه، کلا ازش رد شو
-                        if post_time < week_ago:
-                            continue
-                            
-                    except: continue
+                    post_time = None
+                    if time_tag:
+                        try: post_time = datetime.fromisoformat(time_tag.get('datetime'))
+                        except: pass
 
-                    # پیدا کردن فایل PDF
+                    # اگه پیام مال قبل از ۷ روزه، فقط "این پیام" رو بی‌خیال شو، اما حلقه رو نشکن!
+                    if not post_time or post_time < week_ago:
+                        continue
+
+                    # ۳. شکار PDF
                     doc_wrap = msg.find('div', class_='tgme_widget_message_document')
                     if doc_wrap:
                         title_elem = doc_wrap.find('div', class_='tgme_widget_message_document_title')
@@ -182,19 +165,19 @@ def main():
                             tags = extract_tags(title + " " + caption)
                             send_to_telegram(title, post_url, tags, ch)
                             total_files_in_channel += 1
-                            time.sleep(1.5) # استراحت کوچیک بین ارسال‌ها
+                            time.sleep(1.5)
 
-                # بررسی اینکه آیا به ته هفته رسیدیم؟
-                if oldest_date_in_page < week_ago:
-                    print(f"⏳ رسیدیم به مرز 7 روز پیش در @{ch}. پایان غواصی در این کانال.")
-                    keep_scraping = False
-                    break
-
-                # رفتن به صفحه قبل (پیام‌های قدیمی‌تر)
-                if min_post_id and keep_scraping:
+                # ۴. الگوریتم ضد تله پین‌مسیج برای ورق زدن
+                if valid_ids:
+                    valid_ids.sort()
+                    max_id_on_page = valid_ids[-1]
+                    # فقط آیدی‌هایی رو قبول کن که با بزرگترین آیدی صفحه اختلاف فضایی ندارن (حذف پین‌ها)
+                    normal_ids = [vid for vid in valid_ids if (max_id_on_page - vid) < 5000]
+                    
+                    min_post_id = normal_ids[0] if normal_ids else valid_ids[0]
                     current_url = f"{base_url}?before={min_post_id}"
                     pages_scraped += 1
-                    time.sleep(2) # استراحت بین صفحات برای جلوگیری از ارور 503
+                    time.sleep(2)
                 else:
                     break
 
@@ -202,9 +185,9 @@ def main():
                 print(f"❌ خطا در کانال @{ch}: {e}")
                 break
         
-        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد")
+        print(f"🎯 مجموع فایل‌های شکار شده از @{ch}: {total_files_in_channel} عدد (از بررسی {pages_scraped * 20} پیام)")
 
-    print("\n🎉 غواصی با موفقیت تمام شد! هزاران فایل در انتظار شماست.")
+    print("\n🎉 عملیات بولدوزر تمام شد! الان دیگه کانالت باید منفجر شده باشه.")
 
 if __name__ == "__main__":
     main()
