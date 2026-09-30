@@ -21,7 +21,12 @@ from datetime import datetime, timedelta, timezone
 # 📡 لیست کانال‌های هدف (بدون @)
 # =============================================================================
 CHANNELS = [
-    "Azmoon_Azmayeshi", "Konkur_Tajrobi", "Gaj_Azmoon", "Maz_Azmoon", # نمونه - کانال‌های خودت رو اینجا بذار
+    "Soal75", "WWW_AZMON_COM", "pdf_konkor", "www_book_com", "Irdaneshamoz", "NOTRUPHIL", "@ketabkonkuor",  # نمونه - کانال‌های خودت رو اینجا بذار
+    "plasma_ir", "silent_konkor", "Vidana_file", "mrkonkor", "AyandehSazan_Ed"
+    
+    
+    
+    
     # "channel_name_1", "channel_name_2"
 ]
 
