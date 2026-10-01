@@ -40,12 +40,18 @@ jobs:
         run: |
           git config --global user.name "Turbine-Bot[bot]"
           git config --global user.email "turbine-bot@users.noreply.github.com"
-          git add channels/
           
-          # اگر فایل جدیدی اضافه شده بود کامیت کن، وگرنه ارور نده و برو جلو
-          if git diff --cached --quiet; then
-            echo "لینک جدیدی پیدا نشد، چیزی برای سیو کردن نیست."
+          # 🛡️ ترفند ضد ارور: اول ببین پوشه اصلاً خلق شده یا نه!
+          if [ -d "channels" ]; then
+            git add channels/
+            
+            if git diff --cached --quiet; then
+              echo "☕ پوشه هست ولی تغییر جدیدی نسبت به قبل نداریم."
+            else
+              git commit -m "🤖 اضافه شدن دیتابیس اسپانسرهای امروز [skip ci]"
+              git push
+              echo "🚀 دیتابیس اسپانسرها با موفقیت در ریپازیتوری ذخیره شد!"
+            fi
           else
-            git commit -m "🤖 اضافه شدن دیتابیس اسپانسرهای امروز [skip ci]"
-            git push
+            echo "🕊️ در این اجرا هیچ پوشه اسپانسری ساخته نشد؛ همه چی امن و امانه!"
           fi
